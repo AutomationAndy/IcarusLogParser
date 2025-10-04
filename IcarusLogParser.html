@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Icarus Log Viewer</title>
+  <style>
+    :root{--bg:#0b0f14;--panel:#111825;--muted:#9aa4b2;--text:#e5ecf5;--blue:#2f7de1;--cyan:#2fd1e1;--green:#28c281;--red:#ff6b6b;--border:#1f2a3a}
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(180deg,#0a0e13,#0d131c 35%,#0b0f14);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Inter,Arial}
+    header{position:sticky;top:0;z-index:9;background:rgba(13,19,28,.9);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+    .wrap{max-width:1200px;margin:0 auto;padding:10px 16px}
+    h1{font-size:18px;margin:0}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+    .btn{background:linear-gradient(180deg,#1a2333,#131a28);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:12px;cursor:pointer}
+    .btn:hover{border-color:#2a3b55}
+    .btn.primary{background:linear-gradient(180deg,#2f7de1,#2057a1);border-color:#245aa8}
+    .btn.ghost{background:transparent}
+    .switch{display:inline-flex;align-items:center;gap:6px}
+    .switch input{width:44px;height:24px;appearance:none;background:#1a2432;border:1px solid var(--border);border-radius:999px;position:relative;cursor:pointer}
+    .switch input:checked{background:#214d8a}
+    .switch input::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:50%;transition:transform .18s ease}
+    .switch input:checked::after{transform:translateX(20px)}
+    .drop{border:2px dashed #2a3b55;border-radius:16px;padding:18px;text-align:center;color:var(--muted);background:rgba(17,24,37,.6);margin-top:10px}
+    .drop.drag{background:rgba(47,125,225,.12);border-color:var(--blue);color:#bcd8ff}
+
+    .layout{display:grid;grid-template-columns:260px 1fr;gap:12px;margin-top:12px}
+    aside{background:var(--panel);border:1px solid var(--border);border-radius:16px;overflow:hidden}
+    .search{padding:10px;border-bottom:1px solid var(--border);display:flex;gap:8px}
+    .search input{flex:1;background:#0f1520;border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:10px}
+    .tabs{max-height:65vh;overflow:auto}
+    .tab{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer}
+    .tab:hover{background:#0f1622}
+    .tab.active{background:#132034;border-left:3px solid var(--cyan)}
+    .tab .name{font-weight:600}
+    .tab .count{font-size:12px;color:var(--muted);background:#0e1420;border:1px solid var(--border);padding:2px 8px;border-radius:999px}
+
+    main{background:var(--panel);border:1px solid var(--border);border-radius:16px;overflow:hidden}
+    .mainhead{display:flex;align-items:center;gap:8px;padding:12px;border-bottom:1px solid var(--border)}
+    .badge{font-size:12px;color:#cfe3ff;background:#0e1420;border:1px solid var(--border);padding:4px 8px;border-radius:999px}
+    .tablewrap{max-height:65vh;overflow:auto}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:top}
+    th{position:sticky;top:0;background:#0f1622;text-align:left}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace}
+    .weak{color:var(--muted)}
+    .footer{padding:8px 12px;color:var(--muted);display:flex;justify-content:space-between;border-top:1px solid var(--border)}
+    .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--border);border-radius:999px;background:#0e1420}
+
+    @media (max-width: 900px){.layout{grid-template-columns:1fr}.tabs{max-height:40vh}.tablewrap{max-height:50vh}}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Icarus Log Viewer</h1>
+      <div class="toolbar">
+        <button id="btn-open" class="btn primary">Open log (live follow)</button>
+        <label class="btn">
+          <input id="file-input" type="file" accept=".log,.txt" hidden>
+          Load file once
+        </label>
+        <div class="switch"><input id="follow-toggle" type="checkbox"><span>Live follow</span></div>
+        <button id="btn-export-tab" class="btn">Export current tab (CSV)</button>
+        <button id="btn-clear" class="btn ghost">Clear data</button>
+      </div>
+      <div id="drop" class="drop">Drag & drop a log file here, or use one of the buttons above.</div>
+    </div>
+  </header>
+
+  <div class="wrap layout">
+    <aside>
+      <div class="search">
+        <input id="tab-filter" placeholder="Filter tabs (e.g. LogNet, Crafting)" />
+      </div>
+      <div id="tabs" class="tabs" role="tablist"></div>
+    </aside>
+
+    <main>
+      <div class="mainhead">
+        <div id="tab-title" class="badge">No tab selected</div>
+        <div class="pill"><span>Total lines:</span><strong id="total-lines">0</strong></div>
+        <div class="pill"><span>Events parsed:</span><strong id="total-events">0</strong></div>
+        <div class="pill"><span>Unique tabs:</span><strong id="unique-tabs">0</strong></div>
+      </div>
+      <div class="tablewrap">
+        <table class="mono">
+          <thead>
+            <tr>
+              <th style="width:210px">Timestamp</th>
+              <th style="width:90px">Event ID</th>
+              <th style="width:220px">Event Name</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="footer weak">
+        <div>Tip: Tabs are grouped by <strong>Event Name</strong> (e.g., <em>LogNet</em>). Use the search box to narrow tabs.</div>
+        <div id="status">Idle</div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+  // --- Parsing & State ---
+  const RX = /^\[(?<ts>[^\]]+)\]\[(?<eid>\d+)\](?<ename>[A-Za-z0-9_]+):\s*(?<msg>[\s\S]*)$/;
+
+  const state = {
+    totalLines: 0,
+    totalEvents: 0,
+    groups: new Map(), // ename -> { name, items: [{ts,eid,ename,msg,raw}], count }
+    activeTab: null,
+    fileHandle: null,
+    lastSize: 0,
+    follow: false,
+    pollTimer: null
+  };
+
+  function addLine(line){
+    state.totalLines++;
+    const m = line.match(RX);
+    if(!m) return; // skip unparsed
+    const { ts, eid, ename, msg } = m.groups;
+    state.totalEvents++;
+    if(!state.groups.has(ename)){
+      state.groups.set(ename,{ name: ename, items: [], count: 0 });
+    }
+    const g = state.groups.get(ename);
+    g.items.push({ ts, eid, ename, msg, raw: line });
+    g.count++;
+  }
+
+  function rebuildTabs(){
+    const tabs = [...state.groups.values()]
+      .sort((a,b)=> b.count - a.count || a.name.localeCompare(b.name));
+    const tabsEl = document.getElementById('tabs');
+    const filterVal = document.getElementById('tab-filter').value.trim().toLowerCase();
+    tabsEl.innerHTML = '';
+    let firstShown = null;
+    for(const g of tabs){
+      if(filterVal && !g.name.toLowerCase().includes(filterVal)) continue;
+      const div = document.createElement('div');
+      div.className = 'tab' + (state.activeTab===g.name ? ' active' : '');
+      div.role = 'tab';
+      div.dataset.name = g.name;
+      div.innerHTML = `<span class="name">${g.name}</span><span class="count">${g.count}</span>`;
+      div.onclick = () => { state.activeTab = g.name; rebuildTabs(); renderRows(); };
+      tabsEl.appendChild(div);
+      if(!firstShown) firstShown = g.name;
+    }
+    // Auto-select first tab if none
+    if(!state.activeTab && firstShown){ state.activeTab = firstShown; rebuildTabs(); renderRows(); return; }
+    // Stats
+    document.getElementById('unique-tabs').textContent = state.groups.size;
+  }
+
+  function renderRows(){
+    const tbody = document.getElementById('rows');
+    tbody.innerHTML = '';
+    const title = document.getElementById('tab-title');
+    if(!state.activeTab || !state.groups.has(state.activeTab)){
+      title.textContent = 'No tab selected';
+      return;
+    }
+    const g = state.groups.get(state.activeTab);
+    title.textContent = `${g.name} • ${g.count} event(s)`;
+
+    // Render newest last; could make this toggleable
+    for(const it of g.items){
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="weak">${it.ts}</td>
+        <td>${it.eid}</td>
+        <td class="weak">${it.ename}</td>
+        <td>${escapeHtml(it.msg)}</td>`;
+      tbody.appendChild(tr);
+    }
+
+    document.getElementById('total-lines').textContent = state.totalLines;
+    document.getElementById('total-events').textContent = state.totalEvents;
+  }
+
+  function escapeHtml(s){
+    return s.replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function clearAll(){
+    state.totalLines = 0;
+    state.totalEvents = 0;
+    state.groups.clear();
+    state.activeTab = null;
+    renderRows();
+    rebuildTabs();
+    setStatus('Cleared');
+  }
+
+  // --- File loading ---
+  async function loadFileOnce(file){
+    setStatus('Reading file...');
+    const text = await file.text();
+    const lines = text.split(/\r?\n/);
+    for(const ln of lines){ if(ln) addLine(ln); }
+    rebuildTabs();
+    renderRows();
+    setStatus(`Loaded ${lines.length} line(s)`);
+  }
+
+  async function openWithPicker(){
+    try{
+      const [handle] = await window.showOpenFilePicker({ types:[{ description:'Logs', accept:{ 'text/plain':['.log','.txt'] } }] });
+      state.fileHandle = handle;
+      state.lastSize = 0;
+      await readIncremental(true);
+      if(document.getElementById('follow-toggle').checked){ startFollow(); }
+    }catch(e){ if(e && e.name!=='AbortError') console.error(e); }
+  }
+
+  async function readIncremental(initial=false){
+    if(!state.fileHandle) return;
+    const file = await state.fileHandle.getFile();
+    const size = file.size;
+    let slice;
+    if(initial){
+      // Read entire file on first open
+      slice = await file.slice(0, size).text();
+      state.lastSize = size;
+    } else if(size > state.lastSize){
+      slice = await file.slice(state.lastSize, size).text();
+      state.lastSize = size;
+    } else {
+      return; // nothing new
+    }
+
+    const chunk = slice.split(/\r?\n/);
+    for(const ln of chunk){ if(ln) addLine(ln); }
+    rebuildTabs();
+    renderRows();
+  }
+
+  function startFollow(){
+    if(state.pollTimer) clearInterval(state.pollTimer);
+    state.follow = true;
+    state.pollTimer = setInterval(()=> readIncremental(false).catch(console.error), 1000);
+    setStatus('Live follow ON');
+  }
+
+  function stopFollow(){
+    state.follow = false;
+    if(state.pollTimer) clearInterval(state.pollTimer);
+    state.pollTimer = null;
+    setStatus('Live follow OFF');
+  }
+
+  // --- Export current tab ---
+  function exportCurrentTabCSV(){
+    if(!state.activeTab || !state.groups.has(state.activeTab)) return;
+    const g = state.groups.get(state.activeTab);
+    const rows = [['timestamp','event_id','event_name','message']]
+      .concat(g.items.map(it=>[it.ts,it.eid,it.ename,it.msg.replaceAll('\"','"')]))
+      .map(r=> r.map(v=>`"${(v+"").replaceAll('"','""')}` ).join(','))
+      .join('\n');
+    const blob = new Blob([rows], {type:'text/csv'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${g.name}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  // --- UI wiring ---
+  const drop = document.getElementById('drop');
+  ;['dragenter','dragover'].forEach(ev=> drop.addEventListener(ev, e=>{ e.preventDefault(); drop.classList.add('drag'); }));
+  ;['dragleave','drop'].forEach(ev=> drop.addEventListener(ev, e=>{ e.preventDefault(); drop.classList.remove('drag'); }));
+  drop.addEventListener('drop', e=>{
+    const f = e.dataTransfer.files?.[0];
+    if(f){ clearAll(); loadFileOnce(f); }
+  });
+
+  document.getElementById('file-input').addEventListener('change', e=>{
+    const f = e.target.files?.[0]; if(f){ clearAll(); loadFileOnce(f); }
+  });
+  document.getElementById('btn-open').addEventListener('click', openWithPicker);
+  document.getElementById('follow-toggle').addEventListener('change', e=>{ e.target.checked ? startFollow() : stopFollow(); });
+  document.getElementById('btn-clear').addEventListener('click', clearAll);
+  document.getElementById('btn-export-tab').addEventListener('click', exportCurrentTabCSV);
+  document.getElementById('tab-filter').addEventListener('input', rebuildTabs);
+
+  function setStatus(msg){ document.getElementById('status').textContent = msg; }
+  </script>
+</body>
+</html>
